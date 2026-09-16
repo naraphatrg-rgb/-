@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Chemical Boss: Plant Overseer - Web Simulator</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts for Cyberpunk & Scientific UI -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,400;0,600;0,700;1,700&family=Orbitron:wght@500;700;800;900&family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            tech: ['Orbitron', 'monospace'],
+            sci: ['"Chakra Petch"', 'sans-serif'],
+            prompt: ['Prompt', 'sans-serif'],
+          },
+          colors: {
+            cyber: {
+              bg: '#040711',
+              panel: '#0a1020',
+              card: '#101932',
+              cyan: '#06b6d4',
+              neonCyan: '#22d3ee',
+              neonGreen: '#10b981',
+              neonAmber: '#f59e0b',
+              neonRed: '#ef4444',
+              grid: '#1e293b'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Prompt', sans-serif;
+      background-color: #040711;
+      background-image: 
+        radial-gradient(circle at 50% 15%, rgba(6, 182, 212, 0.15) 0%, transparent 65%),
+        linear-gradient(rgba(30, 41, 59, 0.45) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(30, 41, 59, 0.45) 1px, transparent 1px);
+      background-size: 100% 100%, 28px 28px, 28px 28px;
+    }
+
+    /* CRT scanline texture overlay */
+    .crt-overlay::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.28) 50%);
+      background-size: 100% 4px;
+      z-index: 45;
+      pointer-events: none;
+      opacity: 0.55;
+    }
+
+    /* Strobe animation for hazardous plant alarm */
+    @keyframes siren-strobe {
+      0%, 100% {
+        box-shadow: inset 0 0 65px rgba(239, 68, 68, 0.85), 0 0 35px rgba(239, 68, 68, 0.7);
+        border-color: #ef4444;
+      }
+      50% {
+        box-shadow: inset 0 0 120px rgba(185, 28, 28, 0.35), 0 0 12px rgba(185, 28, 28, 0.25);
+        border-color: #7f1d1d;
+      }
+    }
+
+    .siren-alarm {
+      animation: siren-strobe 0.75s infinite alternate ease-in-out;
+    }
+
+    /* Smooth Dragging Class */
+    .card-dragging {
+      transition: none !important;
+      cursor: grabbing !important;
+    }
+
+    .glow-cyan { filter: drop-shadow(0 0 8px rgba(6, 182, 212, 0.75)); }
+    .glow-green { filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.75)); }
+    .glow-rose { filter: drop-shadow(0 0 8px rgba(244, 63, 94, 0.75)); }
+
+    /* Custom scrollbars */
+    ::-webkit-scrollbar {
+      width: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #080d1a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+
+<body class="min-h-screen text-slate-100 flex flex-col items-center justify-center p-2.5 sm:p-4 select-none relative overflow-x-hidden crt-overlay">
+
+  <!-- Main HUD Frame Container -->
+  <main id="mainHUD" class="w-full max-w-md bg-cyber-panel/95 border-2 border-cyan-500/40 rounded-3xl p-4 sm:p-5 shadow-[0_0_50px_rgba(0,0,0,0.9)] relative overflow-hidden backdrop-blur-md transition-all duration-300">
+    
+    <!-- Cyberpunk Corner Accents -->
+    <div class="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-cyan-400 rounded-tl-xl pointer-events-none"></div>
+    <div class="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-cyan-400 rounded-tr-xl pointer-events-none"></div>
+
+    <!-- Header Console and Navigation -->
+    <header class="flex items-center justify-between border-b border-slate-800/90 pb-3 mb-3">
+      <div class="flex items-center gap-2">
+        <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#10b981] animate-pulse"></div>
+        <div>
+          <h1 class="font-tech text-xs tracking-wider text-cyan-300 font-bold">CHEMICAL BOSS</h1>
+          <div class="text-[10px] text-slate-400 flex items-center gap-1">
+            <span>ผจก.:</span>
+            <span id="displayPlayerName" class="text-amber-300 font-semibold truncate max-w-[100px]">นายช่างนิรนาม</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-1.5">
+        <button onclick="openManual()" title="คู่มือการเล่นและหลักเคมี" class="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-lg text-cyan-400 font-tech flex items-center gap-1 transition-all">
+          📖 <span class="hidden sm:inline">GUIDE</span>
+        </button>
+        <button onclick="openLeaderboard()" title="กระดานผู้นำ" class="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-lg text-amber-400 font-tech flex items-center gap-1 transition-all">
+          🏆 <span class="hidden sm:inline">RANK</span>
+        </button>
+        <button onclick="toggleAudio()" id="audioBtn" title="เปิด/ปิดเสียง" class="p-1.5 text-xs bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-lg transition-all">
+          🔊
+        </button>
+      </div>
+    </header>
+
+    <!-- Hazard Siren Warning Banner -->
+    <div id="hazardBanner" class="hidden mb-3 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-between border border-red-400 shadow-[0_0_20px_rgba(239,68,68,0.7)] animate-pulse">
+      <div class="flex items-center gap-2">
+        <span class="text-base">🚨</span>
+        <span id="hazardText" class="font-sci tracking-wider">CRITICAL: THERMAL RUNAWAY!</span>
+      </div>
+      <span class="font-tech text-[10px] bg-black/60 px-2 py-0.5 rounded border border-red-300 text-red-200">PSM FAULT</span>
+    </div>
+
+    <!-- Challenge Directive Box -->
+    <div id="challengeBox" class="mb-3.5 bg-gradient-to-r from-amber-500/10 to-yellow-600/5 border border-amber-500/40 rounded-2xl p-2.5 sm:p-3 relative transition-all duration-300">
+      <div class="flex justify-between items-center mb-1">
+        <span class="font-sci text-[11px] font-bold text-amber-400 flex items-center gap-1">
+          <span>🎯</span> MISSION DIRECTIVE: HABER-BOSCH
+        </span>
+        <span id="multiplierBadge" class="font-tech text-[10px] bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.5)]">
+          x1.0 BOOST
+        </span>
+      </div>
+      <p id="challengeDesc" class="text-xs text-slate-300 font-light leading-snug">
+        โจทย์วิกฤตปุ๋ย: ผลิต <strong class="text-amber-200 font-semibold">Yield (NH₃) ≥ 75%</strong> และรักษา <strong class="text-amber-200 font-semibold">Safety ≥ 35%</strong>!
+      </p>
+    </div>
+
+    <!-- 3 Core Plant Gauges Section -->
+    <section class="space-y-2.5 mb-4 bg-cyber-bg/90 p-3 rounded-2xl border border-slate-800 shadow-inner">
+      <!-- Gauge 1: Rate -->
+      <div>
+        <div class="flex justify-between items-center text-xs mb-1">
+          <span class="text-cyan-400 font-sci flex items-center gap-1">
+            <span>⚡</span> ความเร็วการผลิต (Rate)
+          </span>
+          <span id="valRate" class="font-tech text-cyan-300 font-bold text-xs">50%</span>
+        </div>
+        <div class="w-full bg-slate-800/80 h-2.5 rounded-full overflow-hidden p-[1px] border border-slate-700/60">
+          <div id="barRate" class="bg-gradient-to-r from-cyan-500 to-blue-400 h-full rounded-full transition-all duration-300 glow-cyan" style="width: 50%;"></div>
+        </div>
+      </div>
+
+      <!-- Gauge 2: Yield -->
+      <div>
+        <div class="flex justify-between items-center text-xs mb-1">
+          <span class="text-emerald-400 font-sci flex items-center gap-1">
+            <span>🧪</span> % ผลผลิต (Yield)
+          </span>
+          <span id="valYield" class="font-tech text-emerald-300 font-bold text-xs">50%</span>
+        </div>
+        <div class="w-full bg-slate-800/80 h-2.5 rounded-full overflow-hidden p-[1px] border border-slate-700/60">
+          <div id="barYield" class="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-300 glow-green" style="width: 50%;"></div>
+        </div>
+      </div>
+
+      <!-- Gauge 3: Safety / Budget -->
+      <div>
+        <div class="flex justify-between items-center text-xs mb-1">
+          <span class="text-rose-400 font-sci flex items-center gap-1">
+            <span>🛡️</span> ความปลอดภัย / งบประมาณ
+          </span>
+          <span id="valSafety" class="font-tech text-rose-300 font-bold text-xs">50%</span>
+        </div>
+        <div class="w-full bg-slate-800/80 h-2.5 rounded-full overflow-hidden p-[1px] border border-slate-700/60">
+          <div id="barSafety" class="bg-gradient-to-r from-rose-500 to-red-400 h-full rounded-full transition-all duration-300 glow-rose" style="width: 50%;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Swipe Decision Stage -->
+    <div class="relative w-full h-[260px] mb-3 flex items-center justify-center">
+      <!-- Background Static Visual Card -->
+      <div class="absolute inset-x-2 bottom-0 top-2 bg-slate-800/30 rounded-2xl border border-slate-700/40 -z-0"></div>
+
+      <!-- Interactive Movable Card -->
+      <article id="swipeCard" class="absolute inset-0 bg-gradient-to-b from-cyber-card via-slate-900 to-slate-950 border-2 border-cyan-500/40 rounded-2xl p-4 flex flex-col justify-between shadow-2xl cursor-grab will-change-transform z-10 transition-transform duration-100 ease-out select-none">
+        
+        <!-- Live Visual Reaction Stamps -->
+        <div id="stampLeft" class="absolute top-3 right-3 border-2 border-cyan-400 text-cyan-400 font-tech font-black text-xs px-2.5 py-0.5 rounded-lg rotate-12 opacity-0 uppercase pointer-events-none transition-opacity">
+          APPROVED (ปัดซ้าย)
+        </div>
+        <div id="stampRight" class="absolute top-3 left-3 border-2 border-rose-400 text-rose-400 font-tech font-black text-xs px-2.5 py-0.5 rounded-lg -rotate-12 opacity-0 uppercase pointer-events-none transition-opacity">
+          OVERCLOCK (ปัดขวา)
+        </div>
+
+        <div>
+          <!-- Card Category & Turn Counter -->
+          <div class="flex items-center justify-between text-[11px] font-tech text-cyan-400 border-b border-slate-800 pb-1.5 mb-2">
+            <span id="cardCategory" class="tracking-wide uppercase">KINETICS PROTOCOL</span>
+            <span class="text-slate-400 font-mono">กะงานที่ <strong id="dayDisplay" class="text-cyan-300 text-xs">01</strong></span>
+          </div>
+
+          <!-- Balanced Chemical Equation Container -->
+          <div class="mb-2 bg-black/60 border border-cyan-500/30 rounded-xl px-2.5 py-1.5 flex items-center justify-between text-xs">
+            <span class="text-[10px] text-slate-400 font-sci uppercase">สมการเคมี:</span>
+            <span id="cardEquation" class="font-sci text-cyan-300 font-semibold tracking-wide text-[11px] sm:text-xs text-right truncate pl-2">
+              A(s) + B(aq) &rarr; C(aq)
+            </span>
+          </div>
+
+          <!-- Story Prompt -->
+          <p id="cardPrompt" class="text-xs sm:text-sm font-semibold text-slate-100 leading-snug">
+            กวนสารไม่ทันตามเป้า สารตั้งต้นเป็นก้อนใหญ่เกินไป ทำให้สัมผัสสารละลายได้ช้า!
+          </p>
+        </div>
+
+        <!-- Choice Preview Indicators -->
+        <div class="border-t border-slate-700/80 pt-2 flex justify-between items-center text-[10px] sm:text-[11px] font-sci">
+          <div class="text-cyan-400 flex items-center gap-1 font-medium max-w-[48%] truncate">
+            <span>◀</span> <span id="hintLeft" class="truncate">บดละเอียด</span>
+          </div>
+          <div class="text-rose-400 flex items-center gap-1 font-medium max-w-[48%] justify-end truncate">
+            <span id="hintRight" class="truncate">อัดไฟ 2 เท่า</span> <span>▶</span>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- Quick Action Buttons for Mouse Clicks & Accessibility -->
+    <div class="grid grid-cols-2 gap-2.5 mb-3">
+      <button onclick="applyChoice('left')" class="p-2.5 bg-slate-800/90 hover:bg-cyan-950/40 border border-slate-700 hover:border-cyan-500 rounded-xl transition-all active:scale-95 text-left flex flex-col justify-between">
+        <span class="font-tech text-[10px] text-cyan-400 font-bold uppercase tracking-wider">
+          ◀ ปัดซ้าย (เลือกตัวเลือกนี้)
+        </span>
+        <span id="btnLeftLabel" class="text-xs text-slate-200 font-medium mt-1 truncate">บดละเอียด</span>
+      </button>
+
+      <button onclick="applyChoice('right')" class="p-2.5 bg-slate-800/90 hover:bg-rose-950/40 border border-slate-700 hover:border-rose-500 rounded-xl transition-all active:scale-95 text-left flex flex-col justify-between">
+        <span class="font-tech text-[10px] text-rose-400 font-bold uppercase tracking-wider text-right">
+          ปัดขวา (เลือกตัวเลือกนี้) ▶
+        </span>
+        <span id="btnRightLabel" class="text-xs text-slate-200 font-medium mt-1 truncate text-right">อัดไฟ 2 เท่า</span>
+      </button>
+    </div>
+
+    <!-- Live Status Footer -->
+    <footer class="flex items-center justify-between text-xs px-1 font-sci text-slate-400 border-t border-slate-800 pt-2">
+      <span class="flex items-center gap-1.5 text-[11px]">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> สถานะเตาปฏิกรณ์: เสถียร
+      </span>
+      <span>คะแนนสะสม: <strong id="scoreText" class="font-tech text-emerald-400 text-sm">0</strong></span>
+    </footer>
+  </main>
+
+  <!-- MODAL 1: Overseer Login / Registration -->
+  <div id="registerModal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-cyber-panel border-2 border-cyan-500/80 rounded-3xl p-6 max-w-sm w-full shadow-[0_0_60px_rgba(6,182,212,0.3)] text-center relative">
+      <div class="text-3xl mb-2">🏭</div>
+      <h2 class="font-tech text-base sm:text-lg font-black text-cyan-400 tracking-wider mb-1">PLANT OVERSEER LOGIN</h2>
+      <p class="font-sci text-xs text-slate-400 mb-4">ลงชื่อเข้ารับตำแหน่งผู้จัดการโรงงานเคมี</p>
+
+      <form onsubmit="handleRegister(event)" class="space-y-4">
+        <div>
+          <label class="block text-left text-xs font-sci text-slate-300 mb-1.5" for="inputName">ชื่อหรือรหัสเรียกขานนายช่าง:</label>
+          <input type="text" id="inputName" maxlength="16" placeholder="เช่น Boss Somchai, Dr. Stone" required
+            class="w-full bg-slate-900 border border-cyan-500/50 rounded-xl px-3 py-2.5 text-sm text-cyan-300 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 font-sci text-center placeholder:text-slate-600">
+        </div>
+        
+        <div class="text-[11px] text-slate-400 font-light text-left bg-black/40 p-2.5 rounded-xl border border-slate-800">
+          ⚠️ <strong>กฎความปลอดภัย:</strong> รักษาระดับ [Rate], [Yield], [Safety/งบประมาณ] ให้อยู่ระหว่าง <strong>1-99%</strong> หากหลุดเหลือ 0 หรือแตะ 100 โรงงานจะเกิดวิกฤตทันที!
+        </div>
+
+        <button type="submit" class="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-tech font-black text-xs rounded-xl shadow-[0_0_20px_rgba(6,182,212,0.4)] active:scale-95 transition-all">
+          START OVERSEER SHIFT (เริ่มกะงาน)
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 2: Comprehensive Game Over & Dual Chemical Debrief -->
+  <div id="gameOverModal" class="hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-3 overflow-y-auto">
+    <div class="bg-cyber-panel border-2 border-red-500/80 rounded-3xl p-5 max-w-md w-full shadow-[0_0_60px_rgba(239,68,68,0.5)] my-auto text-left relative">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-3xl">💥</span>
+        <div>
+          <h2 class="font-tech text-base sm:text-lg font-black text-red-500 tracking-wider">INCIDENT INVESTIGATION REPORT</h2>
+          <p class="font-sci text-[11px] text-slate-400">รายงานสืบสวนอุบัติภัยกระบวนการผลิต &amp; เฉลยหลักเคมี</p>
+        </div>
+      </div>
+
+      <!-- Quick stats summary badge -->
+      <div class="flex items-center justify-between bg-black/60 border border-slate-800 rounded-xl p-2.5 mb-3 text-xs font-sci">
+        <span class="text-slate-300">รอดชีวิต: <strong id="debriefDays" class="text-cyan-400 font-tech">0</strong> กะ</span>
+        <span class="text-slate-300">คะแนน: <strong id="debriefScore" class="text-emerald-400 font-tech">0</strong></span>
+        <span class="text-amber-400 font-tech" id="debriefRankBadge">C-TIER</span>
+      </div>
+
+      <!-- Root Cause of Failure -->
+      <div class="bg-red-950/40 border border-red-500/50 rounded-xl p-3 mb-3">
+        <div class="font-sci text-xs text-red-400 font-bold mb-1 flex items-center gap-1">
+          <span>🛑</span> สาเหตุโรงงานล่มสลาย:
+        </div>
+        <p id="debriefReason" class="text-xs text-slate-200 leading-relaxed font-light">
+          ถังปฏิกรณ์เกิดการระเบิด...
+        </p>
+      </div>
+
+      <!-- In-depth Dual-Choice Chemical Analysis -->
+      <div class="bg-cyan-950/30 border border-cyan-500/40 rounded-xl p-3 mb-4 space-y-2.5">
+        <div class="font-sci text-xs text-cyan-400 font-bold flex items-center gap-1 border-b border-cyan-500/30 pb-1.5">
+          <span>🔬</span> เฉลยวิเคราะห์หลักการเคมีเปรียบเทียบทั้ง 2 ข้อ (Dual-Choice Debrief):
+        </div>
+        <div>
+          <div class="font-sci text-[11px] font-bold text-cyan-300 mb-0.5">◀ ทางเลือกที่คุณตัดสินใจเลือก (Your Action):</div>
+          <p id="debriefSelected" class="text-xs text-slate-300 leading-relaxed font-light pl-2 border-l-2 border-cyan-500/60"></p>
+        </div>
+        <div>
+          <div class="font-sci text-[11px] font-bold text-amber-300 mb-0.5">▶ ทางเลือกตรงกันข้าม (Alternative Action):</div>
+          <p id="debriefAlternative" class="text-xs text-slate-400 leading-relaxed font-light pl-2 border-l-2 border-amber-500/60"></p>
+        </div>
+      </div>
+
+      <!-- Debrief Buttons -->
+      <div class="grid grid-cols-2 gap-2 font-tech text-xs">
+        <button onclick="openLeaderboard()" class="py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl text-amber-300 font-bold transition-all">
+          🏆 LEADERBOARD
+        </button>
+        <button onclick="restartGame()" class="py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95">
+          🔄 เริ่มกะงานใหม่
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 3: Hall of Overseers Leaderboard -->
+  <div id="leaderboardModal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-cyber-panel border-2 border-amber-500/70 rounded-3xl p-5 max-w-sm w-full shadow-[0_0_50px_rgba(245,158,11,0.3)] text-left relative">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">🏆</span>
+          <div>
+            <h3 class="font-tech text-sm font-black text-amber-400 tracking-wide">HALL OF OVERSEERS</h3>
+            <p class="font-sci text-[10px] text-slate-400">ทำเนียบนายช่างคะแนนสูงสุด</p>
+          </div>
+        </div>
+        <button onclick="closeLeaderboard()" class="text-slate-400 hover:text-white text-lg font-mono px-2">&times;</button>
+      </div>
+
+      <div id="leaderboardList" class="space-y-2 mb-4 max-h-[260px] overflow-y-auto pr-1">
+        <!-- Injected dynamically via JS -->
+      </div>
+
+      <button onclick="closeLeaderboard()" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-sci text-xs font-semibold rounded-xl border border-slate-700 transition-all">
+        ปิดหน้าต่าง
+      </button>
+    </div>
+  </div>
+
+  <!-- MODAL 4: Plant Overseer Handbook ("คู่มือการเล่น") -->
+  <div id="manualModal" class="hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-3 overflow-y-auto">
+    <div class="bg-cyber-panel border-2 border-cyan-500/80 rounded-3xl p-5 max-w-md w-full shadow-[0_0_50px_rgba(6,182,212,0.4)] my-auto text-left relative">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">📖</span>
+          <div>
+            <h3 class="font-tech text-sm font-black text-cyan-400 tracking-wide">PLANT OVERSEER MANUAL</h3>
+            <p class="font-sci text-[10px] text-slate-400">คู่มือการปฏิบัติการ &amp; เคล็ดลับสมดุลเคมี</p>
+          </div>
+        </div>
+        <button onclick="closeManual()" class="text-slate-400 hover:text-white text-xl font-mono px-2">&times;</button>
+      </div>
+
+      <div class="space-y-3.5 max-h-[62vh] overflow-y-auto pr-1 text-xs text-slate-300 font-light leading-relaxed">
+        
+        <!-- Section 1: Gameplay Controls -->
+        <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3">
+          <h4 class="font-sci font-bold text-cyan-300 mb-1.5 flex items-center gap-1.5 text-xs">
+            <span>🎮</span> วิธีการเล่น (Tinder / Reigns Gesture Style)
+          </h4>
+          <p class="mb-2">ในแต่ละวันของการทำงานจะมีสถานการณ์ปัญหาเฉพาะหน้าเข้ามาในโรงงาน:</p>
+          <ul class="list-disc pl-4 space-y-1 text-slate-400 text-[11px]">
+            <li><strong class="text-cyan-300">ลากการ์ดไปทางซ้าย (ปัดซ้าย)</strong> หรือคลิกปุ่ม ◀ เพื่อเลือกมาตรการที่ 1</li>
+            <li><strong class="text-rose-300">ลากการ์ดไปทางขวา (ปัดขวา)</strong> หรือคลิกปุ่ม ▶ เพื่อเลือกมาตรการที่ 2</li>
+            <li>ทุกการตัดสินใจจะส่งผลกระทบต่อ 3 เกจวัดหลักพร้อมๆ กัน</li>
+          </ul>
+        </div>
+
+        <!-- Section 2: Gauge Rules -->
+        <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3">
+          <h4 class="font-sci font-bold text-amber-400 mb-1.5 flex items-center gap-1.5 text-xs">
+            <span>⚖️</span> กฎความสมดุล 1 - 99% (ห้ามแตะ 0 หรือ 100)
+          </h4>
+          <div class="space-y-1.5 text-[11px]">
+            <div><strong class="text-cyan-400">⚡ Rate (ความเร็วการผลิต):</strong> ห้ามเหลือ 0% (สายพานหยุดเดิน โดนฟ้องร้อง) และห้ามแตะ 100% (มอเตอร์ไหม้/สหภาพประท้วง)</div>
+            <div><strong class="text-emerald-400">🧪 Yield (% ผลผลิต):</strong> ห้ามเหลือ 0% (มีแต่ขยะสารเคมี ล้มละลาย) และห้ามแตะ 100% (สารอิ่มตัวตกผลึกอุดตันท่อระบาย)</div>
+            <div><strong class="text-rose-400">🛡️ Safety / Budget (ความปลอดภัย/งบ):</strong> ห้ามเหลือ 0% (ถังระเบิด BLEVE หายนะ) และห้ามแตะ 100% (ระวังจนไม่ทำกำไร ถูกบอร์ดไล่ออก)</div>
+          </div>
+        </div>
+
+        <!-- Section 3: Industrial Chemistry Fundamentals -->
+        <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3">
+          <h4 class="font-sci font-bold text-emerald-400 mb-1.5 flex items-center gap-1.5 text-xs">
+            <span>🧪</span> ติวเข้มหลักเคมีโรงงาน (Chemical Principles)
+          </h4>
+          <div class="space-y-2 text-[11px] text-slate-300">
+            <div>
+              <span class="text-cyan-300 font-semibold">• พื้นที่ผิวสัมผัส (Surface Area):</span> การบดละเอียดของแข็งช่วยเพิ่มพื้นที่สัมผัส เร่งอัตราเกิดปฏิกิริยา ($Rate$) อย่างปลอดภัยโดยไม่เสี่ยงร้อนจัด
+            </div>
+            <div>
+              <span class="text-amber-300 font-semibold">• ปฏิกิริยาคายความร้อน (Exothermic, $\Delta H < 0$):</span> การอัดความร้อนจะทำให้สมดุลเลื่อนย้อนกลับ ($Yield$ ลดลง) ตามหลักเลอชาเตอลิเย
+            </div>
+            <div>
+              <span class="text-emerald-300 font-semibold">• ตัวเร่งปฏิกิริยา (Catalyst):</span> ลดพลังงานกระตุ้น ($E_a$) ทำให้ปฏิกิริยาเร็วขึ้นทั้งไปข้างหน้าและย้อนกลับ แต่ต้องระวังงบประมาณสั่งซื้อตัวเร่งใหม่ที่แพงมาก!
+            </div>
+            <div>
+              <span class="text-rose-400 font-semibold">• ความดัน &amp; โมลแก๊ส:</span> การเพิ่มความดันจะผลักสมดุลไปทางฝั่งที่มีจำนวนโมลแก๊สน้อยกว่าเสมอ
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 4: Hazard & Challenge Rules -->
+        <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3">
+          <h4 class="font-sci font-bold text-red-400 mb-1.5 flex items-center gap-1.5 text-xs">
+            <span>🚨</span> ระบบเตือนภัย &amp; ตัวคูณคะแนน 2.0x
+          </h4>
+          <p class="text-[11px] text-slate-400">
+            หากตัดสินใจเลือกทางที่มี <strong class="text-rose-300">ความร้อนสูง + ความดันสูงพร้อมกัน</strong> หรือเกจความปลอดภัยเหลือน้อยกว่า 20% ไซเรนห้องควบคุมจะเปิดเตือน และหากเคลียร์ภารกิจโจทย์ผลิต $\text{NH}_3$ ได้จะปลดล็อกตัวคูณคะแนน <strong>x2.0 Boost</strong> ทันที!
+          </p>
+        </div>
+
+      </div>
+
+      <button onclick="closeManual()" class="w-full mt-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-tech font-bold text-xs rounded-xl shadow-lg transition-all active:scale-95">
+        ACCEPT &amp; RETURN TO CONTROL ROOM
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // ==============================================================
+    // 1. Web Audio Synthesizer (Built-in Web Audio API)
+    // ==============================================================
+    let audioEnabled = true;
+    let audioCtx = null;
+
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    }
+
+    function toggleAudio() {
+      audioEnabled = !audioEnabled;
+      document.getElementById('audioBtn').innerText = audioEnabled ? '🔊' : '🔇';
+    }
+
+    function playTone(freq, type, duration, gainVal = 0.1) {
+      if (!audioEnabled) return;
+      try {
+        initAudio();
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gainNode.gain.setValueAtTime(gainVal, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {}
+    }
+
+    const soundFX = {
+      swipe: () => playTone(340, 'sine', 0.12, 0.08),
+      siren: () => {
+        playTone(720, 'sawtooth', 0.22, 0.08);
+        setTimeout(() => playTone(540, 'sawtooth', 0.22, 0.08), 160);
+      },
+      victory: () => {
+        playTone(523.25, 'triangle', 0.15, 0.1);
+        setTimeout(() => playTone(659.25, 'triangle', 0.15, 0.1), 110);
+        setTimeout(() => playTone(783.99, 'triangle', 0.3, 0.15), 220);
+      },
+      explosion: () => playTone(95, 'square', 0.6, 0.28)
+    };
+
+    // ==============================================================
+    // 2. Game State and LocalStorage Leaderboard
+    // ==============================================================
+    let playerName = localStorage.getItem('chemical_boss_player') || '';
+    
+    let state = {
+      rate: 50,
+      yield: 50,
+      safety: 50,
+      day: 1,
+      score: 0,
+      multiplier: 1.0,
+      challengeCleared: false,
+      isGameOver: false,
+      lastTriggerReason: "",
+      lastSelectedExplanation: "",
+      lastAlternativeExplanation: ""
+    };
+
+    const cardPool = [
+      {
+        category: "KINETICS (อัตราการเกิดปฏิกิริยา)",
+        equation: "A(s) + B(aq) &rarr; C(aq)",
+        prompt: "กวนสารไม่ทันตามเป้า สารตั้งต้นเป็นก้อนใหญ่เกินไป ทำให้สัมผัสสารละลายได้ช้า!",
+        left: {
+          label: "บดละเอียดเพิ่มพื้นที่ผิวสัมผัส",
+          deltaRate: 20,
+          deltaYield: 5,
+          deltaSafety: -5,
+          isHighHeat: false,
+          isHighPressure: false,
+          chemDebrief: "การบดสารของแข็งจะเพิ่มพื้นที่ผิวสัมผัส (Surface Area) ตามทฤษฎีการชน (Collision Theory) ทำให้โมเลกุลสารตั้งต้นสัมผัสกันได้ถี่ขึ้น ส่งผลให้อัตราเร็วของปฏิกิริยาพุ่งสูงขึ้นอย่างปลอดภัย เสียเพียงค่างานบดเล็กน้อย"
+        },
+        right: {
+          label: "อัดไฟเพิ่มอุณหภูมิ 2 เท่า",
+          deltaRate: 35,
+          deltaYield: -20,
+          deltaSafety: -35,
+          isHighHeat: true,
+          isHighPressure: false,
+          chemDebrief: "แม้สมการอาร์เรเนียส (Arrhenius Equation: k = A e^(-Ea/RT)) ชี้ว่าอุณหภูมิสูงจะเร่งปฏิกิริยาอย่างก้าวกระโดด แต่หากเป็นปฏิกิริยาคายความร้อน สมดุลจะย้อนกลับตามหลักเลอชาเตอลิเย ทำให้ได้ผลิตภัณฑ์ (Yield) ลดฮวบ และอุณหภูมิที่สูงเกินขีดจำกัดยังทำให้ความดันไอพุ่งเสี่ยงต่อการเกิด Thermal Explosion!"
+        }
+      },
+      {
+        category: "LE CHATELIER (สมดุลฮาเบอร์-บอช)",
+        equation: "N₂(g) + 3H₂(g) ⇌ 2NH₃(g) &nbsp; [ΔH = -92.4 kJ/mol]",
+        prompt: "วิกฤตปุ๋ยเคมี! ตลาดต้องการแอมโมเนีย (NH₃) ปริมาณมหาศาล แต่ปฏิกิริยาเริ่มหยุดนิ่งที่จุดสมดุล",
+        left: {
+          label: "อัดความดัน 200 atm + ดึง NH₃ ออกเรื่อยๆ",
+          deltaRate: 15,
+          deltaYield: 30,
+          deltaSafety: -15,
+          isHighHeat: false,
+          isHighPressure: true,
+          chemDebrief: "สารตั้งต้นมีแก๊ส 4 โมล ขณะที่ผลิตภัณฑ์มีเพียง 2 โมล การเพิ่มความดันจะบังคับให้ระบบปรับตัวเลื่อนสมดุลไปข้างหน้าทางโมลแก๊สน้อยกว่า (Le Chatelier's Principle) และการควบแน่นดึง NH₃ ออกอย่างต่อเนื่อง จะทำให้สมดุลเลื่อนไปข้างหน้าตลอดเวลา ผลผลิตจึงพุ่งสูง"
+        },
+        right: {
+          label: "สุมไฟเพิ่มอุณหภูมิสูงสุดเพื่อเร่งโมเลกุล",
+          deltaRate: 30,
+          deltaYield: -35,
+          deltaSafety: -30,
+          isHighHeat: true,
+          isHighPressure: false,
+          chemDebrief: "ปฏิกิริยานี้เป็นปฏิกิริยาคายความร้อน (Exothermic Reaction: ΔH < 0) การใส่ความร้อนจะทำให้ระบบปรับตัวต้านการเปลี่ยนแปลง โดยเลื่อนสมดุลย้อนกลับไปทางสารตั้งต้น N₂ และ H₂ ส่งผลให้ % Yield ดิ่งลงอย่างย่อยยับ และสูญเสียงบพลังงานโดยเปล่าประโยชน์"
+        }
+      },
+      {
+        category: "CATALYST MANAGEMENT (ปฏิกิริยากรดซัลฟิวริก)",
+        equation: "2SO₂(g) + O₂(g) ⇌ 2SO₃(g) &nbsp; [ΔH = -198 kJ/mol, ตัวเร่ง V₂O₅]",
+        prompt: "ตัวเร่งปฏิกิริยา V₂O₅ เสื่อมสภาพจากสารพิษ (Catalyst Poisoning) พลังงานกระตุ้น (Ea) พุ่งสูง อัตราผลิตเริ่มดิ่ง!",
+        left: {
+          label: "เบิกงบเปลี่ยนตัวเร่ง V₂O₅ ใหม่ทั้งชุด (งบฮวบ)",
+          deltaRate: 20,
+          deltaYield: 25,
+          deltaSafety: -35,
+          isHighHeat: false,
+          isHighPressure: false,
+          chemDebrief: "[ข้อซ้าย - เปลี่ยนตัวเร่ง]: ตัวเร่งปฏิกิริยา (Catalyst) ช่วยลดพลังงานก่อกัมมันต์ (Ea) โดยเปิดเส้นทางปฏิกิริยาใหม่ที่มีกลไกเร็วกว่า ช่วยกู้ Yield และ Rate คืนมาได้อย่างมีเสถียรภาพ แต่ต้องยอมแลกกับต้นทุนสั่งซื้อตัวเร่งเกรดบริสุทธิ์สูงจนงบประมาณ Safety/Budget ลดฮวบ"
+        },
+        right: {
+          label: "ไม่เปลี่ยนตัวเร่ง! สุมความร้อน + อัดแรงดันชดเชย",
+          deltaRate: 35,
+          deltaYield: -25,
+          deltaSafety: -45,
+          isHighHeat: true,
+          isHighPressure: true,
+          chemDebrief: "[ข้อขวา - สุมความร้อนชดเชย]: การไม่ยอมเปลี่ยนตัวเร่งแล้วฝืนใส่ความร้อนกับแรงดันสูงในปฏิกิริยาคายความร้อน จะผลักสมดุลย้อนกลับ Yield ลดลงฮวบฮาบ และยังทำให้ตัวเร่งเกิดการเกาะกลุ่มหลอมละลาย (Catalyst Sintering) เสียหายถาวร พร้อมเสี่ยงต่อถังปฏิกรณ์แตกกระจาย"
+        }
+      },
+      {
+        category: "EXOTHERMIC RUNAWAY (ความปลอดภัยสารอินทรีย์)",
+        equation: "C₂H₄(g) + H₂O(g) ⇌ C₂H₅OH(g) &nbsp; [ΔH = -45 kJ/mol]",
+        prompt: "ปฏิกิริยาเกิดความร้อนสะสมรวดเร็ว เกจวัดอุณหภูมิในถังขยายตัวจนแรงดันเตะขอบแดง!",
+        left: {
+          label: "เปิดวาล์วน้ำหล่อเย็นฉุกเฉิน (Cooling Loop)",
+          deltaRate: -20,
+          deltaYield: 15,
+          deltaSafety: 30,
+          isHighHeat: false,
+          isHighPressure: false,
+          chemDebrief: "การหล่อเย็นเป็นการดึงความร้อนออกจากระบบคายความร้อน ช่วยเลื่อนสมดุลไปข้างหน้าและป้องกันสภาวะ Thermal Runaway ตามหลักวิศวกรรมความปลอดภัยกระบวนการเคมี (Process Safety Management) แม้อัตราการผลิตจะลดลงชั่วคราว"
+        },
+        right: {
+          label: "ปล่อยกวนต่อเพื่อปิดยอดส่งมอบประจำวัน",
+          deltaRate: 35,
+          deltaYield: -25,
+          deltaSafety: -50,
+          isHighHeat: true,
+          isHighPressure: true,
+          chemDebrief: "เมื่ออัตราการสร้างความร้อนสูงกว่าอัตราการระบายความร้อน จะเกิดปฏิกิริยาลูกโซ่แบบเอกซ์โพเนนเชียล ความดันไอของของเหลวจะพุ่งเกินขีดจำกัดถังบรรจุ นำไปสู่การระเบิดของไอของเหลวเดือดที่ขยายตัวอย่างรวดเร็ว (BLEVE - Boiling Liquid Expanding Vapor Explosion)"
+        }
+      },
+      {
+        category: "ENDOTHERMIC CALCINATION (สมดุลการสลายตัว)",
+        equation: "CaCO₃(s) ⇌ CaO(s) + CO₂(g) &nbsp; [ΔH = +178 kJ/mol]",
+        prompt: "เตาเผาหินปูนสร้างแก๊ส CO₂ ไม่พอป้อนโรงงานแปรรูปปลายน้ำตามสัญญา!",
+        left: {
+          label: "ดูดแก๊ส CO₂ ออกต่อเนื่อง + คุมอุณหภูมิคงที่",
+          deltaRate: 20,
+          deltaYield: 25,
+          deltaSafety: -10,
+          isHighHeat: false,
+          isHighPressure: false,
+          chemDebrief: "ปฏิกิริยานี้มีผลิตภัณฑ์เป็นแก๊ส CO₂ เมื่อลดความเข้มข้นหรือลดความดันย่อยของแก๊สผลิตภัณฑ์ออกจากเตาปิด ระบบจะพยายามสร้างทดแทนโดยเลื่อนสมดุลไปข้างหน้าอย่างมีเสถียรภาพและปลอดภัย"
+        },
+        right: {
+          label: "ปิดช่องระบายแล้วอัดไฟแรงสูง 1000°C",
+          deltaRate: 30,
+          deltaYield: -20,
+          deltaSafety: -40,
+          isHighHeat: true,
+          isHighPressure: true,
+          chemDebrief: "การปิดช่องระบายทำให้แก๊ส CO₂ สะสมตัวจนมีความดันย่อยสูงมาก ซึ่งจะผลักสมดุลย้อนกลับไปทาง CaCO₃ อีกทั้งแรงดันแก๊สสะสมร่วมกับความร้อน 1,000°C จะทำให้โครงสร้างเตาเผาเกิด Overpressurization จนพังทลาย"
+        }
+      }
+    ];
+
+    let currentCardIndex = 0;
+
+    function openManual() {
+      initAudio();
+      document.getElementById('manualModal').classList.remove('hidden');
+    }
+
+    function closeManual() {
+      document.getElementById('manualModal').classList.add('hidden');
+    }
+
+    function handleRegister(e) {
+      e.preventDefault();
+      const input = document.getElementById('inputName').value.trim();
+      if (!input) return;
+      playerName = input;
+      localStorage.setItem('chemical_boss_player', playerName);
+      document.getElementById('displayPlayerName').innerText = playerName;
+      document.getElementById('registerModal').classList.add('hidden');
+      initAudio();
+      updateUI();
+    }
+
+    function checkLogin() {
+      if (!playerName) {
+        document.getElementById('registerModal').classList.remove('hidden');
+      } else {
+        document.getElementById('displayPlayerName').innerText = playerName;
+        document.getElementById('registerModal').classList.add('hidden');
+        updateUI();
+      }
+    }
+
+    function getLeaderboard() {
+      const data = localStorage.getItem('chemical_boss_leaderboard');
+      if (!data) {
+        const mock = [
+          { name: "ดร. กอบเกียรติ (Ex-CEO)", score: 2400, days: 18, rank: "S-TIER" },
+          { name: "วิศวกรสมศักดิ์", score: 1600, days: 12, rank: "A-TIER" },
+          { name: "นศ. เคมีฝึกงาน", score: 800, days: 7, rank: "B-TIER" }
+        ];
+        localStorage.setItem('chemical_boss_leaderboard', JSON.stringify(mock));
+        return mock;
+      }
+      return JSON.parse(data);
+    }
+
+    function saveScoreToLeaderboard(name, score, days) {
+      let list = getLeaderboard();
+      const rankBadge = calculateRank(score, days);
+      list.push({ name: name || "นายช่างนิรนาม", score, days, rank: rankBadge });
+      list.sort((a, b) => b.score - a.score);
+      list = list.slice(0, 8);
+      localStorage.setItem('chemical_boss_leaderboard', JSON.stringify(list));
+    }
+
+    function calculateRank(score, days) {
+      if (score >= 2000) return "S-TIER";
+      if (score >= 1200) return "A-TIER";
+      if (score >= 600) return "B-TIER";
+      return "C-TIER";
+    }
+
+    function openLeaderboard() {
+      const list = getLeaderboard();
+      const container = document.getElementById('leaderboardList');
+      container.innerHTML = "";
+
+      list.forEach((item, idx) => {
+        let medal = `#${idx + 1}`;
+        let medalClass = "text-slate-400";
+        if (idx === 0) { medal = "🥇 #1"; medalClass = "text-amber-300 font-bold"; }
+        if (idx === 1) { medal = "🥈 #2"; medalClass = "text-slate-200 font-bold"; }
+        if (idx === 2) { medal = "🥉 #3"; medalClass = "text-amber-600 font-bold"; }
+
+        const row = document.createElement('div');
+        row.className = "flex items-center justify-between p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs";
+        row.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="font-tech text-xs ${medalClass}">${medal}</span>
+            <div>
+              <div class="font-sci font-bold text-slate-200 truncate max-w-[110px]">${item.name}</div>
+              <div class="text-[10px] text-slate-400 font-mono">${item.days} กะ (${item.rank})</div>
+            </div>
+          </div>
+          <div class="font-tech text-emerald-400 font-bold text-sm">
+            ${item.score} <span class="text-[10px] text-slate-500 font-mono">PTS</span>
+          </div>
+        `;
+        container.appendChild(row);
+      });
+
+      document.getElementById('leaderboardModal').classList.remove('hidden');
+    }
+
+    function closeLeaderboard() {
+      document.getElementById('leaderboardModal').classList.add('hidden');
+    }
+
+    function applyChoice(direction) {
+      if (state.isGameOver) return;
+      initAudio();
+
+      const card = cardPool[currentCardIndex];
+      const action = direction === 'left' ? card.left : card.right;
+      const oppositeAction = direction === 'left' ? card.right : card.left;
+
+      soundFX.swipe();
+
+      // Update plant gauges
+      state.rate += action.deltaRate;
+      state.yield += action.deltaYield;
+      state.safety += action.deltaSafety;
+      state.day += 1;
+      state.score += Math.round(100 * state.multiplier);
+      
+      // Save debrief texts
+      state.lastSelectedExplanation = action.chemDebrief;
+      state.lastAlternativeExplanation = oppositeAction.chemDebrief;
+
+      checkHazardWarning(action);
+      checkChallenge();
+
+      if (checkGameOverCondition()) {
+        triggerGameOver();
+        return;
+      }
+
+      currentCardIndex = (currentCardIndex + 1) % cardPool.length;
+      resetCard();
+      updateUI();
+    }
+
+    function checkHazardWarning(action) {
+      const banner = document.getElementById("hazardBanner");
+      const hazardText = document.getElementById("hazardText");
+      const hud = document.getElementById("mainHUD");
+
+      if (action.isHighHeat && action.isHighPressure) {
+        banner.classList.remove("hidden");
+        hazardText.innerText = "CRITICAL: COMBINED OVERHEAT & OVERPRESSURE!";
+        hud.classList.add("siren-alarm");
+        soundFX.siren();
+      } else if (state.safety <= 20) {
+        banner.classList.remove("hidden");
+        hazardText.innerText = "WARNING: SAFETY BUDGET AT CRITICAL LOW!";
+        hud.classList.add("siren-alarm");
+        soundFX.siren();
+      } else {
+        banner.classList.add("hidden");
+        hud.classList.remove("siren-alarm");
+      }
+    }
+
+    function checkChallenge() {
+      if (!state.challengeCleared && state.yield >= 75 && state.safety >= 35) {
+        state.challengeCleared = true;
+        state.multiplier = 2.0;
+        soundFX.victory();
+
+        const badge = document.getElementById("multiplierBadge");
+        badge.innerText = "🏆 2.0x OVERCLOCK";
+        badge.className = "font-tech text-[10px] bg-emerald-400 text-slate-950 font-black px-2.5 py-0.5 rounded-full shadow-[0_0_15px_rgba(52,211,153,0.8)] animate-bounce";
+
+        const box = document.getElementById("challengeBox");
+        box.className = "mb-3.5 bg-emerald-500/15 border border-emerald-400/50 rounded-2xl p-2.5 sm:p-3 relative transition-all duration-300";
+      }
+    }
+
+    function checkGameOverCondition() {
+      return (
+        state.rate <= 0 || state.rate >= 100 ||
+        state.yield <= 0 || state.yield >= 100 ||
+        state.safety <= 0 || state.safety >= 100
+      );
+    }
+
+    function triggerGameOver() {
+      state.isGameOver = true;
+      soundFX.explosion();
+
+      let reason = "";
+      if (state.rate <= 0) {
+        reason = "อัตราการผลิตกลายเป็น 0% การเดินเครื่องหยุดชะงัก สายพานตาย ถูกฟ้องร้องเรียกค่าปรับผิดนัดส่งมอบและสูญเสียสภาพคล่องอย่างสิ้นเชิง!";
+      } else if (state.rate >= 100) {
+        reason = "อัตราการผลิตทะลุ 100% เครื่องจักรทำงานหนักต่อเนื่องจนมอเตอร์ไหม้ สหภาพแรงงานและพนักงานกะดึกรวมตัวประท้วงหยุดงาน!";
+      } else if (state.yield <= 0) {
+        reason = "% ผลผลิตเหลือ 0% ในถังมีแต่สารปนเปื้อนและกากของเสียเคมีที่ไม่ทำเงิน โรงงานต้องปิดตัวลงเนื่องจากล้มละลายทางต้นทุน!";
+      } else if (state.yield >= 100) {
+        reason = "สารละลายเข้มข้นเกินจุดอิ่มตัวสูงสุด (Supersaturation) ตกผลึกอุดตันท่อระบาย เกิดการกักตัวของแรงดันจนท่อขนส่งฉีกขาด!";
+      } else if (state.safety <= 0) {
+        reason = "💥 ความปลอดภัยเหลือ 0% ถังปฏิกรณ์เคมีเกิดการระเบิดรุนแรงระดับ BLEVE เปลวเพลิงลุกลามทั่วเขตนิคมอุตสาหกรรม!";
+      } else if (state.safety >= 100) {
+        reason = "งบประมาณความปลอดภัยแตะ 100% คุณระมัดระวังจนไม่ยอมลงทุนพัฒนาผลิตภัณฑ์ บอร์ดบริหารมีมติปลดคุณออกโทษฐานบริหารแบบไร้กำไร!";
+      }
+
+      state.lastTriggerReason = reason;
+      saveScoreToLeaderboard(playerName, state.score, state.day);
+
+      document.getElementById('debriefDays').innerText = state.day;
+      document.getElementById('debriefScore').innerText = state.score;
+      document.getElementById('debriefRankBadge').innerText = calculateRank(state.score, state.day);
+      document.getElementById('debriefReason').innerText = reason;
+      document.getElementById('debriefSelected').innerText = state.lastSelectedExplanation;
+      document.getElementById('debriefAlternative').innerText = state.lastAlternativeExplanation;
+
+      document.getElementById('gameOverModal').classList.remove('hidden');
+    }
+
+    function restartGame() {
+      state.rate = 50;
+      state.yield = 50;
+      state.safety = 50;
+      state.day = 1;
+      state.score = 0;
+      state.multiplier = 1.0;
+      state.challengeCleared = false;
+      state.isGameOver = false;
+
+      document.getElementById('gameOverModal').classList.add('hidden');
+      document.getElementById('hazardBanner').classList.add('hidden');
+      document.getElementById('mainHUD').classList.remove('siren-alarm');
+
+      const badge = document.getElementById("multiplierBadge");
+      badge.innerText = "x1.0 BOOST";
+      badge.className = "font-tech text-[10px] bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.5)]";
+
+      const box = document.getElementById("challengeBox");
+      box.className = "mb-3.5 bg-gradient-to-r from-amber-500/10 to-yellow-600/5 border border-amber-500/40 rounded-2xl p-2.5 sm:p-3 relative transition-all duration-300";
+
+      currentCardIndex = 0;
+      resetCard();
+      updateUI();
+    }
+
+    function updateUI() {
+      const clamp = (val) => Math.min(Math.max(val, 0), 100);
+
+      document.getElementById("valRate").innerText = `${state.rate}%`;
+      document.getElementById("barRate").style.width = `${clamp(state.rate)}%`;
+
+      document.getElementById("valYield").innerText = `${state.yield}%`;
+      document.getElementById("barYield").style.width = `${clamp(state.yield)}%`;
+
+      document.getElementById("valSafety").innerText = `${state.safety}%`;
+      document.getElementById("barSafety").style.width = `${clamp(state.safety)}%`;
+
+      const card = cardPool[currentCardIndex];
+      document.getElementById("cardCategory").innerText = card.category;
+      document.getElementById("cardEquation").innerHTML = card.equation;
+      document.getElementById("cardPrompt").innerText = card.prompt;
+      document.getElementById("dayDisplay").innerText = String(state.day).padStart(2, '0');
+
+      document.getElementById("hintLeft").innerText = card.left.label;
+      document.getElementById("hintRight").innerText = card.right.label;
+      document.getElementById("btnLeftLabel").innerText = card.left.label;
+      document.getElementById("btnRightLabel").innerText = card.right.label;
+
+      document.getElementById("scoreText").innerText = state.score;
+    }
+
+    // Touch & Mouse Dragging Physics (Tinder/Reigns swipe feel)
+    const swipeCard = document.getElementById('swipeCard');
+    const stampLeft = document.getElementById('stampLeft');
+    const stampRight = document.getElementById('stampRight');
+    let startX = 0, currentX = 0, isDragging = false;
+
+    function onStart(e) {
+      if (state.isGameOver) return;
+      initAudio();
+      isDragging = true;
+      startX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+      swipeCard.classList.add('card-dragging');
+    }
+
+    function onMove(e) {
+      if (!isDragging) return;
+      const x = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+      currentX = x - startX;
+      const rotate = currentX * 0.08;
+      swipeCard.style.transform = `translateX(${currentX}px) rotate(${rotate}deg)`;
+
+      // Dynamic Stamp Opacity based on displacement
+      const opacity = Math.min(Math.abs(currentX) / 70, 1);
+      if (currentX < -15) {
+        stampLeft.style.opacity = opacity;
+        stampRight.style.opacity = 0;
+      } else if (currentX > 15) {
+        stampRight.style.opacity = opacity;
+        stampLeft.style.opacity = 0;
+      } else {
+        stampLeft.style.opacity = 0;
+        stampRight.style.opacity = 0;
+      }
+    }
+
+    function onEnd() {
+      if (!isDragging) return;
+      isDragging = false;
+      swipeCard.classList.remove('card-dragging');
+      swipeCard.style.transition = 'transform 0.25s ease-out';
+      stampLeft.style.opacity = 0;
+      stampRight.style.opacity = 0;
+
+      const threshold = 80;
+      if (currentX > threshold) {
+        applyChoice('right');
+      } else if (currentX < -threshold) {
+        applyChoice('left');
+      } else {
+        resetCard();
+      }
+      currentX = 0;
+    }
+
+    function resetCard() {
+      swipeCard.style.transform = 'translateX(0px) rotate(0deg)';
+      stampLeft.style.opacity = 0;
+      stampRight.style.opacity = 0;
+    }
+
+    // Bind event listeners
+    swipeCard.addEventListener('mousedown', onStart);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onEnd);
+
+    swipeCard.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('touchend', onEnd);
+
+    window.addEventListener('DOMContentLoaded', () => {
+      checkLogin();
+    });
+  </script>
+</body>
+</html>
